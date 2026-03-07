@@ -1,0 +1,33 @@
+[project]
+name = "anyio-cysqlite"
+dynamic = ["version"]
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Vizonex", email = "VizonexBusiness@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "anyio>=4.12.1",
+    "cysqlite>=0.1.9",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "anyio_cysqlite.__version__"}
+
+[build-system]
+requires = ["setuptools"]
+
+[tool.ruff]
+line-length = 79
+indent-width = 4
+target-version = "py310"
+fix = true
+
+[tool.ruff.lint]
+select = [
+    "I",
+]
+ignore = [
+    "F405",
+]
