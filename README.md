@@ -1,5 +1,5 @@
 <img src="https://raw.githubusercontent.com/Vizonex/anyio-cysqlite/main/anyio-cysqlite-logo.PNG"/>
-
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 # anyio-cysqlite
 A Bidning for cysqlite that makes the database asynchronous
 with any asynchronous library that can be binded to anyio 
@@ -40,6 +40,7 @@ When it comes to database execution updated functionality normally results in be
 
 ## Batteries included
 Unlike cysqlite (As of currently), this library retains access to typehints right out of the box making the library less of a function and attribute guessing game.
+
 
 
 
