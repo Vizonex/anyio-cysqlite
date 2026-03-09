@@ -1,29 +1,32 @@
 import logging
-import sqlite3
 
+import cysqlite
 import pytest
 
 import anyio_cysqlite
-import cysqlite
 
 
 async def test_context_manager_commit(anyio_backend):
     mem_uri = f"file:{anyio_backend}_mem0?mode=memory&cache=shared"
     async with await anyio_cysqlite.connect(mem_uri, uri=True) as acon0:
-        
         async with acon0.atomic():
             await acon0.execute(
-                "CREATE TABLE IF NOT EXISTS lang(id INTEGER PRIMARY KEY, name VARCHAR UNIQUE)"
+                "CREATE TABLE IF NOT EXISTS lang(id INTEGER PRIMARY KEY,"
+                " name VARCHAR UNIQUE)"
             )
-            await acon0.execute("INSERT INTO lang(name) VALUES(?)", ("Python",))
+            await acon0.execute(
+                "INSERT INTO lang(name) VALUES(?)", ("Python",)
+            )
 
-        # Reason we don't open a new connection is due to how cysqlite handles memory. Otherwise
-        # the test with sqlite-anyio would be 1 to 1
+        # Reason we don't open a new connection is due to how cysqlite
+        # handles memory. Otherwise the test with sqlite-anyio would be
+        # 1 to 1
         acur1 = await acon0.cursor()
         await acur1.execute("SELECT name FROM lang")
         assert await acur1.fetchone() == ("Python",)
         await acur1.execute("DROP TABLE IF EXISTS lang;")
-    
+
+
 async def test_context_manager_execute(anyio_backend):
     mem_uri = f"file:{anyio_backend}_mem0?mode=memory&cache=shared"
     async with await anyio_cysqlite.connect(mem_uri, uri=True) as acon0:
@@ -32,7 +35,6 @@ async def test_context_manager_execute(anyio_backend):
         )
         await acon0.execute("INSERT INTO lang(name) VALUES(?)", ("Python",))
 
-   
         acur1 = await acon0.cursor()
         await acur1.execute("SELECT name FROM lang")
         assert await acur1.fetchone() == ("Python",)
@@ -45,7 +47,8 @@ async def test_context_manager_rollback(anyio_backend):
         async with await anyio_cysqlite.connect(mem_uri, uri=True) as acon0:
             acur0 = await acon0.cursor()
             await acur0.execute(
-                "CREATE TABLE lang(id INTEGER PRIMARY KEY, name VARCHAR UNIQUE)"
+                "CREATE TABLE lang(id INTEGER PRIMARY KEY,"
+                " name VARCHAR UNIQUE)"
             )
             await acur0.execute(
                 "INSERT INTO lang(name) VALUES(?)", ("Python",)
@@ -68,7 +71,8 @@ async def test_cursor_context_manager(anyio_backend, caplog):
     ) as acon0:
         async with await acon0.cursor() as acur0:
             await acur0.execute(
-                "CREATE TABLE lang(id INTEGER PRIMARY KEY, name VARCHAR UNIQUE)"
+                "CREATE TABLE lang(id INTEGER PRIMARY KEY,"
+                " name VARCHAR UNIQUE)"
             )
 
         with pytest.raises(cysqlite.ProgrammingError):

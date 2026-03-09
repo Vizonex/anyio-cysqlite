@@ -12,6 +12,10 @@ dependencies = [
     "cysqlite>=0.1.9",
 ]
 
+
+[project.optional-dependencies]
+test = ["pytest"]
+
 [tool.setuptools.dynamic]
 version = {attr = "anyio_cysqlite.__version__"}
 
@@ -27,6 +31,7 @@ fix = true
 [tool.ruff.lint]
 select = [
     "I",
+    "E"
 ]
 ignore = [
     "F405",

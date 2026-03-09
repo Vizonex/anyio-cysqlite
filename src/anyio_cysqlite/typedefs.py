@@ -2,12 +2,12 @@ import sys
 import types
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any, Literal, ParamSpec, TypeAlias, TypeVar
 
-from cysqlite.metadata import *
-
 from cysqlite import _cysqlite
+from cysqlite.metadata import Column, ForeignKey, Index, View
 
 if sys.version_info >= (3, 12):
     from collections.abc import Buffer
@@ -37,17 +37,23 @@ _IsolationLevel: TypeAlias = (
 
 T = TypeVar("T")
 P = ParamSpec("P")
+# NOTE: Needed for typehinting pragma function
+SENTINEL: object = _cysqlite.SENTINEL
 
 # Cysqlite doesn't have good typehints avalible yet so we have to do a bit
 # Of hacking ourselves, The most optimal solution was to make
-# mimics of the function signatures as abstract classes to get around the issue.
+# mimics of the function signatures as abstract classes to get
+# around the issue.
 # SEE: https://github.com/coleifer/cysqlite/issues/1
 
-# Know that these ABCs are not perfect but they try their best to typehint as a workaround
-# this very bad issue.
+# There is currently some hope that we don't have to rely on all of these 
+# anymore, SEE: https://github.com/coleifer/cysqlite/pull/2
+
+# Know that these ABCs are not perfect but they try their best to
+# typehint as a workaround this very bad issue.
 
 
-class _callable_context_manager(ABC):
+class _callable_context_manager(AbstractContextManager):
     @abstractmethod
     def __call__(self, fn: Callable[P, T]) -> Callable[P, T]: ...
 
@@ -71,7 +77,6 @@ class _Atomic(_callable_context_manager):
     def commit(self, begin: bool = True) -> None: ...
     @abstractmethod
     def rollback(self, begin: bool = True) -> None: ...
-
 
 
 class _Savepoint(_callable_context_manager):
@@ -115,7 +120,10 @@ class _Transaction(_callable_context_manager):
 
 
 class _Connection(_callable_context_manager):
-    """Used as an abstraction of cysqlite.Connection due to it's lack of typehint support."""
+    """
+    Used as an abstraction of `cysqlite.Connection` due to it's
+    lack of typehint support.
+    """
 
     @abstractmethod
     def __init__(
