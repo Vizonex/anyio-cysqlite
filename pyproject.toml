@@ -9,7 +9,7 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "anyio>=4.12.1",
-    "cysqlite>=0.1.9",
+    "cysqlite>=0.2.2",
 ]
 
 
