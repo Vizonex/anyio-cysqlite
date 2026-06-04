@@ -1,30 +1,23 @@
 import sys
 from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
-from contextlib import AbstractContextManager, asynccontextmanager
 from functools import partial, wraps
 from logging import Logger, getLogger
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 import cysqlite
-from anyio import (
-    AsyncContextManagerMixin,
-    CapacityLimiter,
-)
+from anyio import CapacityLimiter
 from anyio.to_thread import run_sync
+from cysqlite._cysqlite import Cursor as _Cursor
 
 from .typedefs import (
-    SENTINEL,
     P,
     T,
     _Atomic,
-    _Connection,
-    _Cursor,
     _IsolationLevel,
     _Parameters,
-    _Row,
     _Savepoint,
     _Transaction,
 )
@@ -40,46 +33,35 @@ else:
     from typing_extensions import TypeVarTuple, Unpack
 
 Ts = TypeVarTuple("Ts", default=())
-_RC = TypeVar("_RC", bound=AbstractContextManager)
+
+SENTINEL = object()
 
 
-# NOTE: anyio's AsyncContextManagerMixin can't be used because we
-# need to bind exiting objects around __aexit__
-class AsyncAction(Generic[_RC]):
+class AsyncAction:
     """helper for handling other wrappers like atomic,
     savepoint and transaction"""
 
-    # NOTE: you can subclass AsyncAction's subclasses it's just not recommended
-    __slots__ = ("_real", "_limiter", "__weakref__")
-
-    def __init__(self, real: _RC, limiter: CapacityLimiter):
-        self._real = real
-        self._limiter = limiter
+    __slots__ = ("_real", "_limiter")
 
     async def __aenter__(self):
-        # setting self._real here for Atomic's sake since it can be hybrid.
-        self._real: _RC = await run_sync(
-            self._real.__enter__, limiter=self._limiter
-        )
+        await run_sync(self._real.__enter__, limiter=self._limiter)
         return self
 
     async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> bool | None:
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ):
         return await run_sync(
-            self._real.__exit__,
-            exc_type,
-            exc_val,
-            exc_tb,
-            limiter=self._limiter,
+            self._real.__exit__, exc_type, exc, tb, limiter=self._limiter
         )
 
-    def __call__(self, func: Callable[P, Awaitable[T]]):
-        """wraps function to the database note: it's limited to non-async
-        generators"""
+    def __call__(
+        self, func: Callable[P, Awaitable[T]]
+    ) -> Callable[P, Awaitable[T]]:
+        """wraps function to the database note:
+        it's limited to non-async generators"""
 
         @wraps(func)
         async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
@@ -92,15 +74,19 @@ class AsyncAction(Generic[_RC]):
         self, func: Callable[[Unpack[Ts]], Awaitable[T]], *args: Unpack[Ts]
     ) -> T:
         """
-        Custom function that Runs context manager inside a function
-        without having to setup a wrapper when database is not
-        outside of the main funciton
+        Custom function that Runs context manager inside a function without
+        having to setup a wrapper when database is not outside of a main
+        funciton
         """
         async with self:
             return await func(*args)
 
 
-class Transaction(AsyncAction[_Transaction]):
+class Transaction(AsyncAction):
+    def __init__(self, real: _Transaction, limiter: CapacityLimiter):
+        self._real = real
+        self._limiter = limiter
+
     async def commit(self, begin: bool = True) -> None:
         await run_sync(self._real.commit, begin, limiter=self._limiter)
 
@@ -108,7 +94,11 @@ class Transaction(AsyncAction[_Transaction]):
         await run_sync(self._real.rollback, begin, limiter=self._limiter)
 
 
-class Savepoint(AsyncAction[_Savepoint]):
+class Savepoint(AsyncAction):
+    def __init__(self, real: _Savepoint, limiter: CapacityLimiter):
+        self._real = real
+        self._limiter = limiter
+
     async def commit(self, begin: bool = True):
         await run_sync(self._real.commit, begin, limiter=self._limiter)
 
@@ -116,7 +106,11 @@ class Savepoint(AsyncAction[_Savepoint]):
         await run_sync(self._real.rollback, limiter=self._limiter)
 
 
-class Atomic(AsyncAction[_Atomic]):
+class Atomic(AsyncAction):
+    def __init__(self, real: _Atomic, limiter: CapacityLimiter):
+        self._real = real
+        self._limiter = limiter
+
     async def commit(self, begin: bool = True):
         await run_sync(self._real.commit, begin, limiter=self._limiter)
 
@@ -126,8 +120,6 @@ class Atomic(AsyncAction[_Atomic]):
 
 
 # inspired by sqlite-anyio with a few of my own tweaks
-
-# TODO: Organize functions in a-z order.
 
 
 class Cursor:
@@ -149,14 +141,14 @@ class Cursor:
         # Deques can maker iterating a bit faster over the
         # standard list object as linked lists are known to speed
         # things up.
-        self._buffer: deque[Any | _Row] = deque()
+        self._buffer: deque[Any | cysqlite.Row] = deque()
 
     @property
-    def description(self) -> Any:
+    def description(self) -> tuple[tuple[str, ...], ...] | None:
         return self._real_cursor.description
 
     @property
-    def lastrowid(self) -> int:
+    def lastrowid(self) -> int | None:
         return self._real_cursor.lastrowid
 
     @property
@@ -167,7 +159,7 @@ class Cursor:
         await run_sync(self._real_cursor.close, limiter=self._limiter)
 
     async def execute(
-        self, sql: str, parameters: Sequence[Any] = (), /
+        self, sql: str, parameters: Sequence[_Parameters] = (), /
     ) -> Self:
         await run_sync(
             self._real_cursor.execute, sql, parameters, limiter=self._limiter
@@ -175,7 +167,7 @@ class Cursor:
         return self
 
     async def executemany(
-        self, sql: str, parameters: Sequence[Any], /
+        self, sql: str, parameters: Sequence[_Parameters], /
     ) -> Self:
         await run_sync(
             self._real_cursor.executemany,
@@ -190,7 +182,7 @@ class Cursor:
             self._real_cursor.fetchall, limiter=self._limiter
         )
 
-    async def fetchone(self) -> _Row | None:
+    async def fetchone(self) -> cysqlite.Row | None:
         return await run_sync(
             self._real_cursor.fetchone, limiter=self._limiter
         )
@@ -221,10 +213,10 @@ class Cursor:
             )
         return exception_handled
 
-    async def fetchmany(self, size: int = 100) -> list[_Row | Any]:
+    async def fetchmany(self, size: int = 100) -> list[cysqlite.Row | Any]:
         # next part comes form cysqlite/aio.py
         def _fetch():
-            rows = list()
+            rows = []
             for _ in range(size):
                 try:
                     rows.append(self._real_cursor.__next__())
@@ -232,12 +224,12 @@ class Cursor:
                     break
             return rows
 
-        return await run_sync(_fetch, limiter=self._limiter)
+        return await run_sync(_fetch)
 
-    def __aiter__(self):
+    def __aiter__(self) -> Self:
         return self
 
-    async def __anext__(self):
+    async def __anext__(self) -> Any | cysqlite.Row:
         if not self._buffer:
             self._buffer.extend(await self.fetchmany())
             if not self._buffer:
@@ -248,7 +240,7 @@ class Cursor:
 class Connection:
     def __init__(
         self,
-        real_connection: _Connection,
+        real_connection: cysqlite.Connection,
         exception_handler: Callable[
             [type[BaseException], BaseException, TracebackType, Logger], bool
         ]
@@ -308,7 +300,6 @@ class Connection:
             name,
             progress,
             src_name,
-            limiter=self._limiter,
         )
 
     async def backup_to_file(
@@ -326,7 +317,6 @@ class Connection:
             name,
             progress,
             src_name,
-            limiter=self._limiter,
         )
 
     async def begin(self, lock: _IsolationLevel = None) -> None:
@@ -346,15 +336,11 @@ class Connection:
     async def executemany(
         self, sql: str, seq_of_params: Sequence[_Parameters] | None = None
     ) -> "Cursor":
-        cursor = await run_sync(
-            self._conn.executemany, sql, seq_of_params, limiter=self._limiter
-        )
+        cursor = await run_sync(self._conn.executemany, sql, seq_of_params)
         return self._cursor_factory(cursor)
 
     async def executescript(self, sql: str) -> "Cursor":
-        cursor = await run_sync(
-            self._conn.executescript, sql, limiter=self._limiter
-        )
+        cursor = await run_sync(self._conn.executescript, sql)
         return self._cursor_factory(cursor)
 
     async def close(self) -> None:
@@ -368,12 +354,7 @@ class Connection:
         name: str | None = None,
     ) -> tuple[int, int]:
         return await run_sync(
-            self._conn.checkpoint,
-            full,
-            truncate,
-            restart,
-            name,
-            limiter=self._limiter,
+            self._conn.checkpoint, full, truncate, restart, name
         )
 
     async def commit(self) -> None:
@@ -388,46 +369,40 @@ class Connection:
         )
 
     async def execute_one(self, sql: str, params: _Parameters | None = None):
-        return await run_sync(
-            self._conn.execute_one, sql, params, limiter=self._limiter
-        )
+        return await run_sync(self._conn.execute_one, sql, params)
 
     async def execute_scalar(
         self, sql: str, params: _Parameters | None = None
     ):
-        return await run_sync(
-            self._conn.execute_scalar, sql, params, limiter=self._limiter
-        )
+        return await run_sync(self._conn.execute_scalar, sql, params)
 
     async def autocommit(self) -> int:
-        return await run_sync(self._conn.autocommit, limiter=self._limiter)
+        return await run_sync(self._conn.autocommit)
 
     def atomic(self) -> Atomic:
-        """Opens a new atomic function, this can be used as both an async
-        wrapper or wrappable function"""
+        """Opens a new atomic function, this can be used
+        as both an async wrapper or wrappable function"""
         return Atomic(self._conn.atomic(), self._limiter)
 
     def savepoint(self, sid: str | None = None) -> Savepoint:
-        """Opens a new savepoint, this can be used as both an async wrapper
-        or wrappable function"""
+        """Opens a new savepoint, this can be used
+        as both an async wrapper or wrappable function"""
         return Savepoint(self._conn.savepoint(sid), self._limiter)
 
     def transaction(self, lock: _IsolationLevel = None):
-        """Opens a new transaction, this can be used as both an async wrapper
-        or wrappable function"""
+        """Opens a new transaction, this can be used
+        as both an async wrapper or wrappable function"""
         return Transaction(self._conn.transaction(lock), self._limiter)
 
     async def last_insert_rowid(self) -> int:
-        return await run_sync(
-            self._conn.last_insert_rowid, limiter=self._limiter
-        )
+        return await run_sync(self._conn.last_insert_rowid)
 
     @property
     def in_transaction(self):
         return self._conn.in_transaction
 
     async def status(self, flag: int) -> tuple[int, int]:
-        return await run_sync(self._conn.status, flag, limiter=self._limiter)
+        return await run_sync(self._conn.status, flag)
 
     async def pragma(
         self,
@@ -435,15 +410,23 @@ class Connection:
         value: Any = SENTINEL,
         database: str | None = None,
         multi: bool = False,
-    ) -> Any | Sequence[Any]:
-        return await run_sync(
-            self._conn.pragma,
-            key,
-            value,
-            database,
-            multi,
-            limiter=self._limiter,
-        )
+        permanent: bool = False,
+    ) -> Any:
+        if value != SENTINEL:
+            return await run_sync(
+                self._conn.pragma, key, value, database, multi, permanent
+            )
+        else:
+            # just make value empty we have a different SENTINEL anyways...
+            return await run_sync(
+                partial(
+                    self._conn.pragma,
+                    key=key,
+                    database=database,
+                    multi=multi,
+                    permanent=permanent,
+                )
+            )
 
 
 async def connect(
@@ -454,7 +437,7 @@ async def connect(
     uri: bool = False,
     cached_statements: int = 100,
     extensions: bool = True,
-    row_factory: Callable[..., "_Row"] | None = None,
+    row_factory: Callable[..., "cysqlite.Row"] | None = None,
     autoconnect: bool = True,
     log: Logger | None = None,
     exception_handler: Callable[
@@ -465,8 +448,8 @@ async def connect(
     """
     Open a Connection to the provided database.
 
-    :param database: database filename or ':memory:' for an in-memory
-        database.
+    :param database:  database filename or ':memory:'
+        for an in-memory database.
     :type database: str | pathlib.Path
     :param flags: control how database is opened. See Sqlite Connection Flags.
     :type flags: int | None
@@ -491,7 +474,7 @@ async def connect(
     conn = await run_sync(
         partial(
             cysqlite.connect,
-            database=database,
+            database=str(database),
             flags=flags,
             timeout=timeout,
             vfs=vfs,
