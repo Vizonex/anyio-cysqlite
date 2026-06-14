@@ -1,7 +1,7 @@
 [project]
 name = "anyio-cysqlite"
 dynamic = ["version"]
-description = "Add your description here"
+description = "a anyio and cysqlite library"
 readme = "README.md"
 authors = [
     { name = "Vizonex", email = "VizonexBusiness@gmail.com" }
