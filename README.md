@@ -1,11 +1,15 @@
 <img src="https://raw.githubusercontent.com/Vizonex/anyio-cysqlite/main/anyio-cysqlite-logo.PNG"/>
 
+[![PyPI version](https://badge.fury.io/py/aioplugin.svg)](https://badge.fury.io/py/anyio-cysqlite)
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/aioplugin)](https://pypi.org/project/anyio-cysqlite)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # anyio-cysqlite
 A Bidning for cysqlite that makes the database asynchronous
 with any asynchronous library that can be binded to anyio 
 meaning that it will work with many server implementations and applications including FastAPI, Starlette and Litestar to name a few server libraries.
+
+
 
 ```python
 from anyio_cysqlite import connect
