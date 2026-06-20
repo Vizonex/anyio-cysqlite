@@ -22,6 +22,11 @@ version = {attr = "anyio_cysqlite.__version__"}
 [build-system]
 requires = ["setuptools"]
 
+
+[project.urls]
+    repository = "https://github.com/Vizonex/anyio-cysqlite.git"
+
+
 [tool.ruff]
 line-length = 79
 indent-width = 4

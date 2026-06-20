@@ -14,8 +14,9 @@ on:
   release:
     types: [published]
 
-permissions:
-  contents: read
+permissions:                            
+  id-token: write  
+  contents: write
 
 jobs:
   deploy:
