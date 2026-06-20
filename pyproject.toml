@@ -9,7 +9,7 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "anyio>=4.13.0",
-    "cysqlite>=0.3.2",
+    "cysqlite>=0.3.3",
 ]
 
 
@@ -31,7 +31,8 @@ fix = true
 [tool.ruff.lint]
 select = [
     "I",
-    "E"
+    "E",
+    "RUF"
 ]
 ignore = [
     "F405",

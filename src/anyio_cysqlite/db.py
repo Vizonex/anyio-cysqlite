@@ -1,6 +1,6 @@
 import sys
 from collections import deque
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from functools import partial, wraps
 from logging import Logger, getLogger
 from pathlib import Path
@@ -41,7 +41,7 @@ class AsyncAction:
     """helper for handling other wrappers like atomic,
     savepoint and transaction"""
 
-    __slots__ = ("_real", "_limiter")
+    __slots__ = ("__weakref__", "_limiter", "_real")
 
     async def __aenter__(self):
         await run_sync(self._real.__enter__, limiter=self._limiter)
@@ -123,6 +123,15 @@ class Atomic(AsyncAction):
 
 
 class Cursor:
+    __slots__ = (
+        "__weakref__",
+        "_buffer",
+        "_exception_handler",
+        "_limiter",
+        "_log",
+        "_real_cursor",
+    )
+
     def __init__(
         self,
         real_cursor: _Cursor,
@@ -238,6 +247,14 @@ class Cursor:
 
 
 class Connection:
+    __slots__ = (
+        "__weakref__",
+        "_conn",
+        "_exception_handler",
+        "_limiter",
+        "_log",
+    )
+
     def __init__(
         self,
         real_connection: cysqlite.Connection,
@@ -376,7 +393,7 @@ class Connection:
     ):
         return await run_sync(self._conn.execute_scalar, sql, params)
 
-    async def autocommit(self) -> int:
+    async def autocommit(self) -> bool:
         return await run_sync(self._conn.autocommit)
 
     def atomic(self) -> Atomic:
@@ -384,12 +401,43 @@ class Connection:
         as both an async wrapper or wrappable function"""
         return Atomic(self._conn.atomic(), self._limiter)
 
+    async def optimize(
+        self,
+        debug: bool = False,
+        run_tables: bool = True,
+        set_limit: bool = True,
+        check_table_sizes: bool = False,
+        dry_run: bool = False,
+    ):
+        if dry_run:
+            mode = -1
+        else:
+            mode = 0
+            if debug:
+                mode |= 0x01
+            if run_tables:
+                mode |= 0x02
+            if set_limit:
+                mode |= 0x10
+            if check_table_sizes:
+                mode |= 0x10000
+        return await self.execute("pragma optimize=?", (mode,))
+
+    async def attach(self, filename: str, name: str) -> None:
+        await self.execute_one("ATTACH DATABASE ? as ?", (filename, name))
+
+    async def detach(self, name: str) -> None:
+        await self.execute_one("DETACH DATABASE ?", (name,))
+
+    async def set_main_db_name(self, name: str) -> None:
+        await run_sync(self._conn.set_main_db_name, name, limiter=self._limiter)
+
     def savepoint(self, sid: str | None = None) -> Savepoint:
         """Opens a new savepoint, this can be used
         as both an async wrapper or wrappable function"""
         return Savepoint(self._conn.savepoint(sid), self._limiter)
 
-    def transaction(self, lock: _IsolationLevel = None):
+    def transaction(self, lock: _IsolationLevel = None) -> Transaction:
         """Opens a new transaction, this can be used
         as both an async wrapper or wrappable function"""
         return Transaction(self._conn.transaction(lock), self._limiter)
@@ -398,7 +446,7 @@ class Connection:
         return await run_sync(self._conn.last_insert_rowid)
 
     @property
-    def in_transaction(self):
+    def in_transaction(self) -> bool:
         return self._conn.in_transaction
 
     async def status(self, flag: int) -> tuple[int, int]:
@@ -428,6 +476,46 @@ class Connection:
                 )
             )
 
+    # Type System
+    def register_adapter(
+        self, python_type: type, fn: Callable[[Any], Any]
+    ) -> None:
+        self._conn.register_adapter(python_type, fn)
+
+    def unregister_adapter(self, python_type: type):
+        self._conn.unregister_adapter(python_type)
+
+    def adapter(
+        self, python_type: type
+    ) -> Callable[[Callable[P, T]], Callable[P, T]]:
+        return self.adapter(python_type)
+
+    def register_converter(
+        self, data_type: str, fn: Callable[[bytes | str | int | float], Any]
+    ) -> None:
+        self._conn.register_converter(data_type, fn)
+
+    def unregister_converter(self, data_type: str) -> None:
+        self._conn.unregister_converter(data_type)
+
+    def converter(
+        self, data_type: str
+    ) -> Callable[[Callable[P, T]], Callable[P, T]]:
+        return self._conn.converter(data_type)
+
+    def register_type(
+        self,
+        data_type: str | None = None,
+        converter: Callable[[bytes | str | int | float], Any] | None = None,
+        python_type: type | None = None,
+        adapter: Callable[[Any], Any] | None = None,
+    ) -> None:
+        return self._conn.register_type(
+            data_type, converter, python_type, adapter
+        )
+
+    # TODO: Hooks...
+
 
 async def connect(
     database: str | Path,
@@ -444,6 +532,8 @@ async def connect(
         [type[BaseException], BaseException, TracebackType, Logger], bool
     ]
     | None = None,
+    pragmas: Mapping[str, Any] | None = None,
+    journal_mode: str | None = None,
 ) -> Connection:
     """
     Open a Connection to the provided database.
@@ -468,6 +558,17 @@ async def connect(
     :type row_factory: Callable[..., _T] | None
     :param autoconnect: Open connection when initiated
     :type autoconnect: bool
+
+    :param journal_mode: It is a convenience shorthand
+        for setting the  journal_mode pragma at connect time, e.g. 'wal'.
+        Equivalent to including 'journal_mode' in pragmas;
+        an explicit entry in pragmas takes precedence.
+    :type journal_mode: str | None
+    :param pragmas: Optional mapping of pragmas to specify when
+        connection is opened, e.g. {'journal_mode': 'wal'}. The
+        dict is copied internally and is not mutated by the
+        connection.
+    :type pragmas: Mapping[str, Any] | None
     :rtype: Connection
     :returns: Connection to database under an anyio asynchronous wrapper
     """
@@ -483,6 +584,8 @@ async def connect(
             extensions=extensions,
             row_factory=row_factory or cysqlite.Row,
             autoconnect=autoconnect,
+            pragmas=pragmas,
+            journal_mode=journal_mode,
         )
     )
     return Connection(conn, exception_handler, log)
