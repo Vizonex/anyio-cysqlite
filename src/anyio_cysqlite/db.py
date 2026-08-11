@@ -362,9 +362,9 @@ class Connection:
 
     async def __aexit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        exc_type: type[BaseException] | None = None,
+        exc_val: BaseException | None = None,
+        exc_tb: TracebackType | None = None,
     ) -> bool | None:
         await self.close()
 
