@@ -7,6 +7,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any
 
+import anyio
 import cysqlite
 from anyio import CapacityLimiter
 from anyio.to_thread import run_sync
@@ -43,7 +44,7 @@ class AsyncAction:
 
     __slots__ = ("__weakref__", "_limiter", "_real")
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         await run_sync(self._real.__enter__, limiter=self._limiter)
         return self
 
@@ -257,17 +258,96 @@ class Connection:
 
     def __init__(
         self,
-        real_connection: cysqlite.Connection,
+        database: str | Path | anyio.Path,
+        flags: int | None = None,
+        timeout: float = 5.0,
+        vfs: str | None = None,
+        uri: bool = False,
+        cached_statements: int = 100,
+        extensions: bool = True,
+        row_factory: Callable[..., "cysqlite.Row"] | None = None,
+        autoconnect: bool = True,
+        log: Logger | None = None,
+        exception_handler: Callable[
+            [type[BaseException], BaseException, TracebackType, Logger], bool
+        ]
+        | None = None,
+        pragmas: Mapping[str, Any] | None = None,
+        journal_mode: str | None = None,
+    ) -> None:
+        """
+        :param database:  database filename or ':memory:'
+            for an in-memory database.
+        :type database: str | pathlib.Path
+        :param flags: control how database is opened. See Sqlite Connection
+            Flags.
+        :type flags: int | None
+        :param timeout: seconds to retry acquiring write lock before raising a
+            OperationalError when table is locked.
+        :type timeout: float
+        :param vfs: VFS to use, optional.
+        :type vfs: str | None
+        :param uri: Allow connecting using a URI.
+        :type uri: bool
+        :param cached_statements: Size of statement cache.
+        :type cached_statements: int
+        :param extensions: Support run-time loadable extensions.
+        :type extensions: bool
+        :param row_factory: Factory implementation for constructing rows, e.g. 
+            Row
+        :type row_factory: Callable[..., _T] | None
+        :param autoconnect: Open connection when initiated
+        :type autoconnect: bool
+        :param journal_mode: It is a convenience shorthand
+            for setting the  journal_mode pragma at connect time, e.g. 'wal'.
+            Equivalent to including 'journal_mode' in pragmas;
+            an explicit entry in pragmas takes precedence.
+        :type journal_mode: str | None
+        :param pragmas: Optional mapping of pragmas to specify when
+            connection is opened, e.g. {'journal_mode': 'wal'}. The
+            dict is copied internally and is not mutated by the
+            connection.
+        :type pragmas: Mapping[str, Any] | None
+        """
+
+        self._conn = cysqlite.Connection(
+            database=str(database),
+            flags=flags,
+            timeout=timeout,
+            vfs=vfs,
+            uri=uri,
+            cached_statements=cached_statements,
+            extensions=extensions,
+            row_factory=row_factory or cysqlite.Row,
+            autoconnect=autoconnect,
+            pragmas=pragmas,
+            journal_mode=journal_mode,
+        )
+        self._exception_handler = exception_handler
+        self._log = log or getLogger(__name__)
+        self._limiter = CapacityLimiter(1)
+
+    # 2 different ways to initialize a connection is done mostly to act as
+    # a shortcut it can be a bit annoying to call await connect() and want to
+    # wrap your own database objects into it.
+    @classmethod
+    def from_raw_connection(
+        cls,
+        conn: cysqlite.Connection,
         exception_handler: Callable[
             [type[BaseException], BaseException, TracebackType, Logger], bool
         ]
         | None = None,
         log: Logger | None = None,
     ) -> None:
-        self._conn = real_connection
+        """Initalizes a Connection from a prexisting cysqlite connection."""
+        self = cls.__new__(cls)
+
+        self._conn = conn
         self._exception_handler = exception_handler
         self._log = log or getLogger(__name__)
         self._limiter = CapacityLimiter(1)
+        return self
 
     def _cursor_factory(self, cursor: _Cursor) -> "Cursor":
         return Cursor(
@@ -282,9 +362,9 @@ class Connection:
 
     async def __aexit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        exc_type: type[BaseException] | None = None,
+        exc_val: BaseException | None = None,
+        exc_tb: TracebackType | None = None,
     ) -> bool | None:
         await self.close()
 
@@ -396,10 +476,10 @@ class Connection:
     async def autocommit(self) -> bool:
         return await run_sync(self._conn.autocommit)
 
-    def atomic(self) -> Atomic:
+    def atomic(self, lock: str | None = None) -> Atomic:
         """Opens a new atomic function, this can be used
         as both an async wrapper or wrappable function"""
-        return Atomic(self._conn.atomic(), self._limiter)
+        return Atomic(self._conn.atomic(lock), self._limiter)
 
     async def optimize(
         self,
@@ -430,7 +510,9 @@ class Connection:
         await self.execute_one("DETACH DATABASE ?", (name,))
 
     async def set_main_db_name(self, name: str) -> None:
-        await run_sync(self._conn.set_main_db_name, name, limiter=self._limiter)
+        await run_sync(
+            self._conn.set_main_db_name, name, limiter=self._limiter
+        )
 
     def savepoint(self, sid: str | None = None) -> Savepoint:
         """Opens a new savepoint, this can be used
@@ -518,7 +600,7 @@ class Connection:
 
 
 async def connect(
-    database: str | Path,
+    database: str | Path | anyio.Path,
     flags: int | None = None,
     timeout: float = 5.0,
     vfs: str | None = None,
@@ -588,7 +670,7 @@ async def connect(
             journal_mode=journal_mode,
         )
     )
-    return Connection(conn, exception_handler, log)
+    return Connection.from_raw_connection(conn, exception_handler, log)
 
 
 def exception_logger(
