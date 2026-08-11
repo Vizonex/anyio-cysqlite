@@ -17,26 +17,32 @@ from anyio_cysqlite import connect
 
 async def main():
     async with await connect("cysqlite.db") as db:
-        await db.execute('create table IF NOT EXISTS data (k, v)')
+        await db.execute("create table IF NOT EXISTS data (k, v)")
 
         async with db.atomic():
-            await db.executemany('insert into data (k, v) values (?, ?)',
-                           [(f'k{i:02d}', f'v{i:02d}') for i in range(10)])
+            await db.executemany(
+                "insert into data (k, v) values (?, ?)",
+                [(f"k{i:02d}", f"v{i:02d}") for i in range(10)],
+            )
             print(await db.last_insert_rowid())  # 10.
 
-        curs = await db.execute('select * from data')
+        curs = await db.execute("select * from data")
         async for row in curs:
             print(row)  # e.g., ('k00', 'v00')
 
         # We can use named parameters with a dict as well.
-        row = await db.execute_one('select * from data where k = :key and v = :val',
-                             {'key': 'k05', 'val': 'v05'})
+        row = await db.execute_one(
+            "select * from data where k = :key and v = :val",
+            {"key": "k05", "val": "v05"},
+        )
         print(row)  # ('k05', 'v05')
 
         await db.close()
 
+
 if __name__ == "__main__":
     import anyio
+
     anyio.run(main)
 ```
 
