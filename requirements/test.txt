@@ -1,4 +1,4 @@
 pytest==9.2.0
 winloop==0.8.1; platform_system == "Windows"
 uvloop; platform_system != "Windows"
-trio==0.34.0
+trio==0.35.0
