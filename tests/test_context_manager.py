@@ -26,6 +26,7 @@ async def test_context_manager_commit(anyio_backend):
         assert await acur1.fetchone() == ("Python",)
         await acur1.execute("DROP TABLE IF EXISTS lang;")
 
+
 async def test_context_manager_connection_class(anyio_backend):
     mem_uri = f"file:{anyio_backend}_mem5?mode=memory&cache=shared"
     async with anyio_cysqlite.Connection(mem_uri, uri=True) as acon0:

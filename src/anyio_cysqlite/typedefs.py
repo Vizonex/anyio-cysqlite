@@ -13,10 +13,7 @@ if sys.version_info >= (3, 12):
 else:
     from typing_extensions import Buffer
 
-if sys.version_info >= (3, 11):
-    from typing import Self
-else:
-    from typing_extensions import Self
+from typing import Self
 
 # cysqlite maintainer currently shows Zero intrest in the idea
 # of utilizing typehints so that users don't have to second guess
