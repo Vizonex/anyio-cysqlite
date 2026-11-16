@@ -5,7 +5,10 @@ from functools import partial, wraps
 from logging import Logger, getLogger
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import (
+    Any,
+    Self,
+)
 
 import anyio
 import cysqlite
@@ -22,11 +25,6 @@ from .typedefs import (
     _Savepoint,
     _Transaction,
 )
-
-if sys.version_info >= (3, 11):
-    from typing import Self
-else:
-    from typing_extensions import Self  # pragma: nocover
 
 if sys.version_info >= (3, 13):
     from typing import TypeVarTuple, Unpack
@@ -72,7 +70,7 @@ class AsyncAction:
         return wrapper
 
     async def run(
-        self, func: Callable[[Unpack[Ts]], Awaitable[T]], *args: Unpack[Ts]
+        self, func: Callable[[Unpack[Ts]], Awaitable[T]], *args: *Ts
     ) -> T:
         """
         Custom function that Runs context manager inside a function without
@@ -293,7 +291,7 @@ class Connection:
         :type cached_statements: int
         :param extensions: Support run-time loadable extensions.
         :type extensions: bool
-        :param row_factory: Factory implementation for constructing rows, e.g. 
+        :param row_factory: Factory implementation for constructing rows, e.g.
             Row
         :type row_factory: Callable[..., _T] | None
         :param autoconnect: Open connection when initiated

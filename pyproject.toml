@@ -6,10 +6,10 @@ readme = "README.md"
 authors = [
     { name = "Vizonex", email = "VizonexBusiness@gmail.com" }
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "anyio>=4.13.0",
-    "cysqlite>=0.3.3",
+    "anyio>=4.16.0",
+    "cysqlite>=0.4.1",
 ]
 
 
@@ -30,14 +30,15 @@ requires = ["setuptools"]
 [tool.ruff]
 line-length = 79
 indent-width = 4
-target-version = "py310"
+target-version = "py311"
 fix = true
 
 [tool.ruff.lint]
 select = [
     "I",
     "E",
-    "RUF"
+    "RUF",
+    "UP"
 ]
 ignore = [
     "F405",
